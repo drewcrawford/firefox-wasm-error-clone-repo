@@ -1,0 +1,14 @@
+{
+  "name": "firefox-wasm-error-clone-repro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reproducer for Firefox treating Error values as non-cloneable after a raw WebAssembly import path",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node build.js",
+    "serve": "python3 -m http.server 8040"
+  },
+  "dependencies": {
+    "wabt": "1.0.39"
+  }
+}

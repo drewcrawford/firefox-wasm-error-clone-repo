@@ -1,0 +1,161 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Firefox Wasm Error Clone Repro</title>
+<style>
+  :root {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    color: #111827;
+    background: #f3f4f6;
+  }
+
+  body {
+    margin: 0;
+    padding: 24px;
+  }
+
+  #status {
+    padding: 16px 20px;
+    border-radius: 14px;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    margin-bottom: 16px;
+    background: #dbeafe;
+    color: #1e3a8a;
+  }
+
+  #status.pass {
+    background: #dcfce7;
+    color: #166534;
+  }
+
+  #status.fail {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  #status.pending {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  #explanation {
+    margin: 0 0 16px;
+    font-size: 16px;
+  }
+
+  #checks {
+    margin: 0 0 16px;
+    padding-left: 20px;
+  }
+
+  #output {
+    margin: 0;
+    padding: 16px;
+    border-radius: 14px;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    overflow: auto;
+  }
+</style>
+<div id="status" class="pending">RUNNING</div>
+<p id="explanation">Waiting for worker results.</p>
+<ul id="checks"></ul>
+<pre id="output">booting...</pre>
+<script type="module">
+  const status = document.getElementById("status");
+  const explanation = document.getElementById("explanation");
+  const checks = document.getElementById("checks");
+  const output = document.getElementById("output");
+  const worker = new Worker("./worker.js?v=1", { type: "module" });
+
+  function verdictItem(label, ok, detail) {
+    const li = document.createElement("li");
+    li.textContent = `${ok ? "PASS" : "FAIL"}: ${label}${detail ? ` (${detail})` : ""}`;
+    return li;
+  }
+
+  function renderVerdict(data) {
+    checks.textContent = "";
+    const byLabel = new Map((data.results || []).map((r) => [r.label, r]));
+    const directError = byLabel.get("direct-raw-helper-error");
+    const importedError = byLabel.get("raw-wasm-import-error");
+    const directObject = byLabel.get("direct-raw-helper-object");
+    const importedObject = byLabel.get("raw-wasm-import-object");
+
+    const conditions = [
+      {
+        label: "Direct helper Error is cloneable",
+        ok: directError?.structuredCloneOk === true,
+        detail: directError?.cloneMessage,
+      },
+      {
+        label: "Raw Wasm imported Error is cloneable",
+        ok: importedError?.structuredCloneOk === true,
+        detail: importedError?.cloneMessage,
+      },
+      {
+        label: "Direct helper object is cloneable",
+        ok: directObject?.structuredCloneOk === true,
+        detail: directObject?.cloneMessage,
+      },
+      {
+        label: "Raw Wasm imported object is cloneable",
+        ok: importedObject?.structuredCloneOk === true,
+        detail: importedObject?.cloneMessage,
+      },
+    ];
+
+    for (const condition of conditions) {
+      checks.appendChild(verdictItem(condition.label, condition.ok, condition.detail));
+    }
+
+    const allHealthy = conditions.every((condition) => condition.ok);
+    const bugReproduced =
+      directError?.structuredCloneOk === true &&
+      importedError?.structuredCloneOk === false &&
+      directObject?.structuredCloneOk === true &&
+      importedObject?.structuredCloneOk === true;
+
+    if (allHealthy) {
+      status.className = "pass";
+      status.textContent = "PASS";
+      explanation.textContent = "This browser handles the raw WebAssembly import path correctly.";
+      return;
+    }
+
+    if (bugReproduced) {
+      status.className = "fail";
+      status.textContent = "FAIL";
+      explanation.textContent =
+        "Bug present: Firefox/WebAssembly import path makes the helper-created Error non-cloneable.";
+      return;
+    }
+
+    status.className = "fail";
+    status.textContent = "UNEXPECTED RESULT";
+    explanation.textContent =
+      "This browser did not match either the healthy path or the known Firefox failure pattern.";
+  }
+
+  worker.addEventListener("message", (event) => {
+    output.textContent = JSON.stringify(event.data, null, 2);
+    window.__raw_wasm_results = event.data;
+    if (event.data?.ok) {
+      renderVerdict(event.data);
+    } else {
+      status.className = "fail";
+      status.textContent = "WORKER FAILED";
+      explanation.textContent = event.data?.error || "Worker failed before producing results.";
+    }
+    console.log(event.data);
+  });
+
+  worker.addEventListener("error", (event) => {
+    status.className = "fail";
+    status.textContent = "WORKER ERROR";
+    explanation.textContent = event.message || String(event.error || "unknown");
+    output.textContent = `worker error: ${event.message || event.error || "unknown"}`;
+    console.error(event);
+  });
+</script>
